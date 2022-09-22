@@ -77,7 +77,6 @@ class TaskController extends Controller
      *          example = {
                     "title": "First Task",
                     "description": "This is First Task",
-                    "status_id": 1,
                     "project_id": "",
                     "user_id": "",
      *          }
@@ -108,11 +107,10 @@ class TaskController extends Controller
     public function store(Request $request)
     {
         try {
-            $credentials = $request->only('title','description','status_id','project_id','user_id');
+            $credentials = $request->only('title','description','project_id','user_id');
             $validator = Validator::make($credentials, [
                 'title' => 'required|string|max:50',
                 'description' => 'required|string',
-                'status_id' => 'integer',
                 'project_id' => 'required|string',
                 'user_id' => 'required|string',
             ]);
@@ -120,14 +118,6 @@ class TaskController extends Controller
             # Cred Validation
             if ($validator->fails()) {
                 return response()->json(['error' => $validator->errors(), 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
-            }
-
-            $status = 1;
-            if ($request->status_id) {
-                if (!MasterStatus::find($request->status_id)) {
-                    return response()->json(['error' => "status_id not found", 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
-                }
-                $status = $request->status_id;
             }
 
             # Check Primary key
@@ -140,10 +130,10 @@ class TaskController extends Controller
             }
 
             $currentUser = JWTAuth::authenticate($request->token);
-            Tasks::create([
+            $data = Tasks::create([
                 "title" => $request->title,
                 "description" => $request->description,
-                "status_id" => $status,
+                "status_id" => 1,
                 "project_id" => $request->project_id,
                 "user_id" => $request->user_id,
                 "created_by" => $currentUser->id
@@ -151,7 +141,8 @@ class TaskController extends Controller
 
             return response()->json([
                 'status' => Response::HTTP_CREATED,
-                'message' => "Create Task Success"
+                'message' => "Create Task Success",
+                'data' => $data
             ], Response::HTTP_CREATED);
         } catch (Exception $e) {
             return response()->json([
@@ -289,8 +280,8 @@ class TaskController extends Controller
                     'title' => 'required|string|max:50',
                     'description' => 'required|string',
                     'status_id' => 'integer',
-                    'project_id' => 'required|string',
-                    'user_id' => 'required|string',
+                    'project_id' => 'string',
+                    'user_id' => 'string',
                 ]);
 
                 # Cred Validation
@@ -298,27 +289,41 @@ class TaskController extends Controller
                     return response()->json(['error' => $validator->errors(), 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
                 }
 
-                # Check Foreign key
+                # Get User Role
+                $currentUser = JWTAuth::authenticate($request->token);
+                $role_id = $currentUser->role_id;
+
                 if ($request->status_id) {
                     if (!MasterStatus::find($request->status_id)) {
                         return response()->json(['error' => "status_id not found", 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
                     }
-                    $status = $request->status_id;
+                    $data->status_id = $request->status_id;
                 }
 
-                if (!Projects::find($request->project_id)) {
-                    return response()->json(['error' => "project_id not found", 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
+                # Only Product Owner can change Project
+                if ($request->project_id) {
+                    if ($role_id != 2) {
+                        return response()->json(["status"=>Response::HTTP_UNAUTHORIZED,'message' => 'Unauthorized User'],Response::HTTP_UNAUTHORIZED);
+                    }
+                    if (!Projects::find($request->project_id)) {
+                        return response()->json(['error' => "project_id not found", 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
+                    }
+                    $data->project_id = $request->project_id;
                 }
 
-                if (!User::find($request->user_id)) {
-                    return response()->json(['error' => "user_id not found", 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
+                # Only Product Owner can change user
+                if ($request->user_id) {
+                    if ($role_id != 2) {
+                        return response()->json(["status"=>Response::HTTP_UNAUTHORIZED,'message' => 'Unauthorized User'],Response::HTTP_UNAUTHORIZED);
+                    }
+                    if (!User::find($request->user_id)) {
+                        return response()->json(['error' => "user_id not found", 'status' => Response::HTTP_BAD_REQUEST], Response::HTTP_BAD_REQUEST);
+                    }
+                    $data->user_id = $request->user_id;
                 }
 
                 $data->title = $request->title;
                 $data->description = $request->description;
-                $data->status_id = $request->status_id;
-                $data->project_id = $request->project_id;
-                $data->user_id = $request->user_id;
                 $data->save();
 
                 return response()->json([
@@ -339,7 +344,7 @@ class TaskController extends Controller
             ], Response::HTTP_BAD_REQUEST);
         }
     }
-
+    
     /**
      * @OA\Delete(
      * path="/v1/task/{id}",
